@@ -25,6 +25,7 @@
 
 #include "src/core/lib/support/atomic.h"
 
+extern "C" {
 #include "src/core/lib/channel/channel_stack.h"
 #include "src/core/lib/support/string.h"
 #include "src/core/lib/surface/api_trace.h"
@@ -32,6 +33,7 @@
 #include "src/core/lib/surface/channel.h"
 #include "src/core/lib/surface/lame_client.h"
 #include "src/core/lib/transport/static_metadata.h"
+}
 
 namespace grpc_core {
 

@@ -39,7 +39,9 @@ extern "C" {
 
 typedef struct grpc_error grpc_error;
 
-extern grpc_core::DebugOnlyTraceFlag grpc_trace_error_refcount;
+#ifndef NDEBUG
+extern grpc_tracer_flag grpc_trace_error_refcount;
+#endif
 
 typedef enum {
   /// 'errno' from the operating system

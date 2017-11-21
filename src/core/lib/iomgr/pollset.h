@@ -29,7 +29,9 @@
 extern "C" {
 #endif
 
-extern grpc_core::DebugOnlyTraceFlag grpc_trace_fd_refcount;
+#ifndef NDEBUG
+extern grpc_tracer_flag grpc_trace_fd_refcount;
+#endif
 
 /* A grpc_pollset is a set of file descriptors that a higher level item is
    interested in. For example:

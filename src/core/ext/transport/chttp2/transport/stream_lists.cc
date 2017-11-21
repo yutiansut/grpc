@@ -39,7 +39,8 @@ static const char* stream_list_id_string(grpc_chttp2_stream_list_id id) {
   GPR_UNREACHABLE_CODE(return "unknown");
 }
 
-grpc_core::TraceFlag grpc_trace_http2_stream_state(false, "http2_stream_state");
+grpc_tracer_flag grpc_trace_http2_stream_state =
+    GRPC_TRACER_INITIALIZER(false, "http2_stream_state");
 
 /* core list management */
 
@@ -65,7 +66,7 @@ static bool stream_list_pop(grpc_chttp2_transport* t,
     s->included[id] = 0;
   }
   *stream = s;
-  if (s && grpc_trace_http2_stream_state.enabled()) {
+  if (s && GRPC_TRACER_ON(grpc_trace_http2_stream_state)) {
     gpr_log(GPR_DEBUG, "%p[%d][%s]: pop from %s", t, s->id,
             t->is_client ? "cli" : "svr", stream_list_id_string(id));
   }
@@ -87,7 +88,7 @@ static void stream_list_remove(grpc_chttp2_transport* t, grpc_chttp2_stream* s,
   } else {
     t->lists[id].tail = s->links[id].prev;
   }
-  if (grpc_trace_http2_stream_state.enabled()) {
+  if (GRPC_TRACER_ON(grpc_trace_http2_stream_state)) {
     gpr_log(GPR_DEBUG, "%p[%d][%s]: remove from %s", t, s->id,
             t->is_client ? "cli" : "svr", stream_list_id_string(id));
   }
@@ -119,7 +120,7 @@ static void stream_list_add_tail(grpc_chttp2_transport* t,
   }
   t->lists[id].tail = s;
   s->included[id] = 1;
-  if (grpc_trace_http2_stream_state.enabled()) {
+  if (GRPC_TRACER_ON(grpc_trace_http2_stream_state)) {
     gpr_log(GPR_DEBUG, "%p[%d][%s]: add to %s", t, s->id,
             t->is_client ? "cli" : "svr", stream_list_id_string(id));
   }

@@ -27,8 +27,10 @@
 #include "src/core/lib/iomgr/timer.h"
 #include "src/core/lib/surface/completion_queue.h"
 
-grpc_core::DebugOnlyTraceFlag grpc_trace_alarm_refcount(false,
-                                                        "alarm_refcount");
+#ifndef NDEBUG
+grpc_tracer_flag grpc_trace_alarm_refcount =
+    GRPC_TRACER_INITIALIZER(false, "alarm_refcount");
+#endif
 
 struct grpc_alarm {
   gpr_refcount refs;
@@ -57,7 +59,7 @@ static void alarm_unref(grpc_alarm* alarm) {
 #ifndef NDEBUG
 static void alarm_ref_dbg(grpc_alarm* alarm, const char* reason,
                           const char* file, int line) {
-  if (grpc_trace_alarm_refcount.enabled()) {
+  if (GRPC_TRACER_ON(grpc_trace_alarm_refcount)) {
     gpr_atm val = gpr_atm_no_barrier_load(&alarm->refs.count);
     gpr_log(file, line, GPR_LOG_SEVERITY_DEBUG,
             "Alarm:%p  ref %" PRIdPTR " -> %" PRIdPTR " %s", alarm, val,
@@ -69,7 +71,7 @@ static void alarm_ref_dbg(grpc_alarm* alarm, const char* reason,
 
 static void alarm_unref_dbg(grpc_alarm* alarm, const char* reason,
                             const char* file, int line) {
-  if (grpc_trace_alarm_refcount.enabled()) {
+  if (GRPC_TRACER_ON(grpc_trace_alarm_refcount)) {
     gpr_atm val = gpr_atm_no_barrier_load(&alarm->refs.count);
     gpr_log(file, line, GPR_LOG_SEVERITY_DEBUG,
             "Alarm:%p  Unref %" PRIdPTR " -> %" PRIdPTR " %s", alarm, val,
@@ -101,7 +103,7 @@ grpc_alarm* grpc_alarm_create(void* reserved) {
   grpc_alarm* alarm = (grpc_alarm*)gpr_malloc(sizeof(grpc_alarm));
 
 #ifndef NDEBUG
-  if (grpc_trace_alarm_refcount.enabled()) {
+  if (GRPC_TRACER_ON(grpc_trace_alarm_refcount)) {
     gpr_log(GPR_DEBUG, "Alarm:%p created (ref: 1)", alarm);
   }
 #endif

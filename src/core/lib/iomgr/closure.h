@@ -33,7 +33,9 @@
 struct grpc_closure;
 typedef struct grpc_closure grpc_closure;
 
-extern grpc_core::DebugOnlyTraceFlag grpc_trace_closure;
+#ifndef NDEBUG
+extern grpc_tracer_flag grpc_trace_closure;
+#endif
 
 typedef struct grpc_closure_list {
   grpc_closure* head;

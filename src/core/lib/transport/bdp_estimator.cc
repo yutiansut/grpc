@@ -23,7 +23,8 @@
 
 #include <grpc/support/useful.h>
 
-grpc_core::TraceFlag grpc_bdp_estimator_trace(false, "bdp_estimator");
+grpc_tracer_flag grpc_bdp_estimator_trace =
+    GRPC_TRACER_INITIALIZER(false, "bdp_estimator");
 
 namespace grpc_core {
 
@@ -43,7 +44,7 @@ grpc_millis BdpEstimator::CompletePing(grpc_exec_ctx* exec_ctx) {
   double dt = (double)dt_ts.tv_sec + 1e-9 * (double)dt_ts.tv_nsec;
   double bw = dt > 0 ? ((double)accumulator_ / dt) : 0;
   int start_inter_ping_delay = inter_ping_delay_;
-  if (grpc_bdp_estimator_trace.enabled()) {
+  if (GRPC_TRACER_ON(grpc_bdp_estimator_trace)) {
     gpr_log(GPR_DEBUG,
             "bdp[%s]:complete acc=%" PRId64 " est=%" PRId64
             " dt=%lf bw=%lfMbs bw_est=%lfMbs",
@@ -54,7 +55,7 @@ grpc_millis BdpEstimator::CompletePing(grpc_exec_ctx* exec_ctx) {
   if (accumulator_ > 2 * estimate_ / 3 && bw > bw_est_) {
     estimate_ = GPR_MAX(accumulator_, estimate_ * 2);
     bw_est_ = bw;
-    if (grpc_bdp_estimator_trace.enabled()) {
+    if (GRPC_TRACER_ON(grpc_bdp_estimator_trace)) {
       gpr_log(GPR_DEBUG, "bdp[%s]: estimate increased to %" PRId64, name_,
               estimate_);
     }
@@ -71,7 +72,7 @@ grpc_millis BdpEstimator::CompletePing(grpc_exec_ctx* exec_ctx) {
   }
   if (start_inter_ping_delay != inter_ping_delay_) {
     stable_estimate_count_ = 0;
-    if (grpc_bdp_estimator_trace.enabled()) {
+    if (GRPC_TRACER_ON(grpc_bdp_estimator_trace)) {
       gpr_log(GPR_DEBUG, "bdp[%s]:update_inter_time to %dms", name_,
               inter_ping_delay_);
     }

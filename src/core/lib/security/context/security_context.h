@@ -22,7 +22,9 @@
 #include "src/core/lib/iomgr/pollset.h"
 #include "src/core/lib/security/credentials/credentials.h"
 
-extern grpc_core::DebugOnlyTraceFlag grpc_trace_auth_context_refcount;
+#ifndef NDEBUG
+extern grpc_tracer_flag grpc_trace_auth_context_refcount;
+#endif
 
 #ifdef __cplusplus
 extern "C" {

@@ -24,7 +24,6 @@
 #include <string.h>
 
 #include "src/core/lib/debug/trace.h"
-#include "src/core/lib/security/context/security_context.h"
 #include "src/core/lib/security/credentials/credentials.h"
 #include "src/core/lib/security/credentials/plugin/plugin_credentials.h"
 #include "src/core/lib/security/transport/auth_filters.h"
@@ -34,7 +33,18 @@
 #include "src/core/lib/surface/channel_init.h"
 #include "src/core/tsi/transport_security_interface.h"
 
-void grpc_security_pre_init(void) {}
+#ifndef NDEBUG
+#include "src/core/lib/security/context/security_context.h"
+#endif
+
+void grpc_security_pre_init(void) {
+  grpc_register_tracer(&grpc_trace_secure_endpoint);
+  grpc_register_tracer(&tsi_tracing_enabled);
+#ifndef NDEBUG
+  grpc_register_tracer(&grpc_trace_auth_context_refcount);
+  grpc_register_tracer(&grpc_trace_security_connector_refcount);
+#endif
+}
 
 static bool maybe_prepend_client_auth_filter(
     grpc_exec_ctx* exec_ctx, grpc_channel_stack_builder* builder, void* arg) {
@@ -75,4 +85,7 @@ void grpc_register_security_filters(void) {
                                    maybe_prepend_server_auth_filter, nullptr);
 }
 
-void grpc_security_init() { grpc_security_register_handshaker_factories(); }
+void grpc_security_init() {
+  grpc_security_register_handshaker_factories();
+  grpc_register_tracer(&grpc_plugin_credentials_trace);
+}

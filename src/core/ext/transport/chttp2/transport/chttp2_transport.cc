@@ -90,9 +90,13 @@ static int g_default_max_pings_without_data = DEFAULT_MAX_PINGS_BETWEEN_DATA;
 static int g_default_max_ping_strikes = DEFAULT_MAX_PING_STRIKES;
 
 #define MAX_CLIENT_STREAM_ID 0x7fffffffu
-grpc_core::TraceFlag grpc_http_trace(false, "http");
-grpc_core::DebugOnlyTraceFlag grpc_trace_chttp2_refcount(false,
-                                                         "chttp2_refcount");
+grpc_tracer_flag grpc_http_trace = GRPC_TRACER_INITIALIZER(false, "http");
+grpc_tracer_flag grpc_flowctl_trace = GRPC_TRACER_INITIALIZER(false, "flowctl");
+
+#ifndef NDEBUG
+grpc_tracer_flag grpc_trace_chttp2_refcount =
+    GRPC_TRACER_INITIALIZER(false, "chttp2_refcount");
+#endif
 
 /* forward declarations of various callbacks that we'll build closures around */
 static void write_action_begin_locked(grpc_exec_ctx* exec_ctx, void* t,
@@ -231,7 +235,7 @@ static void destruct_transport(grpc_exec_ctx* exec_ctx,
 void grpc_chttp2_unref_transport(grpc_exec_ctx* exec_ctx,
                                  grpc_chttp2_transport* t, const char* reason,
                                  const char* file, int line) {
-  if (grpc_trace_chttp2_refcount.enabled()) {
+  if (GRPC_TRACER_ON(grpc_trace_chttp2_refcount)) {
     gpr_atm val = gpr_atm_no_barrier_load(&t->refs.count);
     gpr_log(GPR_DEBUG, "chttp2:unref:%p %" PRIdPTR "->%" PRIdPTR " %s [%s:%d]",
             t, val, val - 1, reason, file, line);
@@ -242,7 +246,7 @@ void grpc_chttp2_unref_transport(grpc_exec_ctx* exec_ctx,
 
 void grpc_chttp2_ref_transport(grpc_chttp2_transport* t, const char* reason,
                                const char* file, int line) {
-  if (grpc_trace_chttp2_refcount.enabled()) {
+  if (GRPC_TRACER_ON(grpc_trace_chttp2_refcount)) {
     gpr_atm val = gpr_atm_no_barrier_load(&t->refs.count);
     gpr_log(GPR_DEBUG, "chttp2:  ref:%p %" PRIdPTR "->%" PRIdPTR " %s [%s:%d]",
             t, val, val + 1, reason, file, line);
@@ -1233,7 +1237,7 @@ void grpc_chttp2_complete_closure_step(grpc_exec_ctx* exec_ctx,
     return;
   }
   closure->next_data.scratch -= CLOSURE_BARRIER_FIRST_REF_BIT;
-  if (grpc_http_trace.enabled()) {
+  if (GRPC_TRACER_ON(grpc_http_trace)) {
     const char* errstr = grpc_error_string(error);
     gpr_log(
         GPR_DEBUG,
@@ -1392,7 +1396,7 @@ static void perform_stream_op_locked(grpc_exec_ctx* exec_ctx, void* stream_op,
 
   GRPC_STATS_INC_HTTP2_OP_BATCHES(exec_ctx);
 
-  if (grpc_http_trace.enabled()) {
+  if (GRPC_TRACER_ON(grpc_http_trace)) {
     char* str = grpc_transport_stream_op_batch_string(op);
     gpr_log(GPR_DEBUG, "perform_stream_op_locked: %s; on_complete = %p", str,
             op->on_complete);
@@ -1682,7 +1686,7 @@ static void perform_stream_op(grpc_exec_ctx* exec_ctx, grpc_transport* gt,
     }
   }
 
-  if (grpc_http_trace.enabled()) {
+  if (GRPC_TRACER_ON(grpc_http_trace)) {
     char* str = grpc_transport_stream_op_batch_string(op);
     gpr_log(GPR_DEBUG, "perform_stream_op[s=%p]: %s", s, str);
     gpr_free(str);
@@ -2590,7 +2594,7 @@ static void schedule_bdp_ping_locked(grpc_exec_ctx* exec_ctx,
 static void start_bdp_ping_locked(grpc_exec_ctx* exec_ctx, void* tp,
                                   grpc_error* error) {
   grpc_chttp2_transport* t = (grpc_chttp2_transport*)tp;
-  if (grpc_http_trace.enabled()) {
+  if (GRPC_TRACER_ON(grpc_http_trace)) {
     gpr_log(GPR_DEBUG, "%s: Start BDP ping err=%s", t->peer_string,
             grpc_error_string(error));
   }
@@ -2604,7 +2608,7 @@ static void start_bdp_ping_locked(grpc_exec_ctx* exec_ctx, void* tp,
 static void finish_bdp_ping_locked(grpc_exec_ctx* exec_ctx, void* tp,
                                    grpc_error* error) {
   grpc_chttp2_transport* t = (grpc_chttp2_transport*)tp;
-  if (grpc_http_trace.enabled()) {
+  if (GRPC_TRACER_ON(grpc_http_trace)) {
     gpr_log(GPR_DEBUG, "%s: Complete BDP ping err=%s", t->peer_string,
             grpc_error_string(error));
   }
@@ -3105,7 +3109,7 @@ static void benign_reclaimer_locked(grpc_exec_ctx* exec_ctx, void* arg,
       grpc_chttp2_stream_map_size(&t->stream_map) == 0) {
     /* Channel with no active streams: send a goaway to try and make it
      * disconnect cleanly */
-    if (grpc_resource_quota_trace.enabled()) {
+    if (GRPC_TRACER_ON(grpc_resource_quota_trace)) {
       gpr_log(GPR_DEBUG, "HTTP2: %s - send goaway to free memory",
               t->peer_string);
     }
@@ -3113,7 +3117,8 @@ static void benign_reclaimer_locked(grpc_exec_ctx* exec_ctx, void* arg,
                 grpc_error_set_int(
                     GRPC_ERROR_CREATE_FROM_STATIC_STRING("Buffers full"),
                     GRPC_ERROR_INT_HTTP2_ERROR, GRPC_HTTP2_ENHANCE_YOUR_CALM));
-  } else if (error == GRPC_ERROR_NONE && grpc_resource_quota_trace.enabled()) {
+  } else if (error == GRPC_ERROR_NONE &&
+             GRPC_TRACER_ON(grpc_resource_quota_trace)) {
     gpr_log(GPR_DEBUG,
             "HTTP2: %s - skip benign reclamation, there are still %" PRIdPTR
             " streams",
@@ -3135,7 +3140,7 @@ static void destructive_reclaimer_locked(grpc_exec_ctx* exec_ctx, void* arg,
   if (error == GRPC_ERROR_NONE && n > 0) {
     grpc_chttp2_stream* s =
         (grpc_chttp2_stream*)grpc_chttp2_stream_map_rand(&t->stream_map);
-    if (grpc_resource_quota_trace.enabled()) {
+    if (GRPC_TRACER_ON(grpc_resource_quota_trace)) {
       gpr_log(GPR_DEBUG, "HTTP2: %s - abandon stream id %d", t->peer_string,
               s->id);
     }

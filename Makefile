@@ -3606,7 +3606,6 @@ LIBGRPC_TEST_UTIL_SRC = \
     test/core/util/port.cc \
     test/core/util/port_server_client.cc \
     test/core/util/slice_splitter.cc \
-    test/core/util/tracer_util.cc \
     test/core/util/trickle_endpoint.cc \
     src/core/lib/backoff/backoff.cc \
     src/core/lib/channel/channel_args.cc \
@@ -3862,7 +3861,6 @@ LIBGRPC_TEST_UTIL_UNSECURE_SRC = \
     test/core/util/port.cc \
     test/core/util/port_server_client.cc \
     test/core/util/slice_splitter.cc \
-    test/core/util/tracer_util.cc \
     test/core/util/trickle_endpoint.cc \
     src/core/lib/backoff/backoff.cc \
     src/core/lib/channel/channel_args.cc \

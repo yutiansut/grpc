@@ -24,7 +24,6 @@
 namespace grpc_objective_c_generator {
 
 using ::grpc::protobuf::FileDescriptor;
-using ::grpc::protobuf::FileDescriptor;
 using ::grpc::protobuf::ServiceDescriptor;
 using ::grpc::string;
 

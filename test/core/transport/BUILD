@@ -43,6 +43,9 @@ grpc_cc_test(
         "//test/core/util:gpr_test_util",
         "//test/core/util:grpc_test_util",
     ],
+    external_deps = [
+        "gtest",
+    ],
 )
 
 grpc_cc_test(
@@ -126,6 +129,7 @@ grpc_cc_test(
     language = "C++",
     deps = [
         "//:grpc",
+        "//test/core/util:gpr_test_util",
     ],
     external_deps = [
         "gtest",

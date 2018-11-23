@@ -55,7 +55,7 @@ static grpc_channel* create_proxy_client(const char* target,
                                          grpc_channel_args* client_args) {
   grpc_channel* channel;
   grpc_channel_credentials* ssl_creds =
-      grpc_ssl_credentials_create(nullptr, nullptr, nullptr);
+      grpc_ssl_credentials_create(nullptr, nullptr, nullptr, nullptr);
   grpc_arg ssl_name_override = {
       GRPC_ARG_STRING,
       const_cast<char*>(GRPC_SSL_TARGET_NAME_OVERRIDE_ARG),
@@ -138,7 +138,7 @@ void chttp2_tear_down_secure_fullstack(grpc_end2end_test_fixture* f) {
 static void chttp2_init_client_simple_ssl_secure_fullstack(
     grpc_end2end_test_fixture* f, grpc_channel_args* client_args) {
   grpc_channel_credentials* ssl_creds =
-      grpc_ssl_credentials_create(nullptr, nullptr, nullptr);
+      grpc_ssl_credentials_create(nullptr, nullptr, nullptr, nullptr);
   grpc_arg ssl_name_override = {
       GRPC_ARG_STRING,
       const_cast<char*>(GRPC_SSL_TARGET_NAME_OVERRIDE_ARG),
@@ -187,7 +187,7 @@ static grpc_end2end_test_config configs[] = {
          FEATURE_MASK_SUPPORTS_PER_CALL_CREDENTIALS |
          FEATURE_MASK_SUPPORTS_CLIENT_CHANNEL |
          FEATURE_MASK_SUPPORTS_AUTHORITY_HEADER,
-     chttp2_create_fixture_secure_fullstack,
+     "foo.test.google.fr", chttp2_create_fixture_secure_fullstack,
      chttp2_init_client_simple_ssl_secure_fullstack,
      chttp2_init_server_simple_ssl_secure_fullstack,
      chttp2_tear_down_secure_fullstack},

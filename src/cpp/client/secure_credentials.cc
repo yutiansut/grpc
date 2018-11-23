@@ -36,12 +36,25 @@ SecureChannelCredentials::SecureChannelCredentials(
 
 std::shared_ptr<grpc::Channel> SecureChannelCredentials::CreateChannel(
     const string& target, const grpc::ChannelArguments& args) {
+  return CreateChannelWithInterceptors(
+      target, args,
+      std::vector<
+          std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>());
+}
+
+std::shared_ptr<grpc::Channel>
+SecureChannelCredentials::CreateChannelWithInterceptors(
+    const string& target, const grpc::ChannelArguments& args,
+    std::vector<
+        std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
+        interceptor_creators) {
   grpc_channel_args channel_args;
   args.SetChannelArgs(&channel_args);
   return CreateChannelInternal(
       args.GetSslTargetNameOverride(),
       grpc_secure_channel_create(c_creds_, target.c_str(), &channel_args,
-                                 nullptr));
+                                 nullptr),
+      std::move(interceptor_creators));
 }
 
 SecureCallCredentials::SecureCallCredentials(grpc_call_credentials* c_creds)
@@ -83,9 +96,38 @@ std::shared_ptr<ChannelCredentials> SslCredentials(
 
   grpc_channel_credentials* c_creds = grpc_ssl_credentials_create(
       options.pem_root_certs.empty() ? nullptr : options.pem_root_certs.c_str(),
-      options.pem_private_key.empty() ? nullptr : &pem_key_cert_pair, nullptr);
+      options.pem_private_key.empty() ? nullptr : &pem_key_cert_pair, nullptr,
+      nullptr);
   return WrapChannelCredentials(c_creds);
 }
+
+namespace experimental {
+
+// Builds ALTS Credentials given ALTS specific options
+std::shared_ptr<ChannelCredentials> AltsCredentials(
+    const AltsCredentialsOptions& options) {
+  GrpcLibraryCodegen init;  // To call grpc_init().
+  grpc_alts_credentials_options* c_options =
+      grpc_alts_credentials_client_options_create();
+  for (auto service_account = options.target_service_accounts.begin();
+       service_account != options.target_service_accounts.end();
+       service_account++) {
+    grpc_alts_credentials_client_options_add_target_service_account(
+        c_options, service_account->c_str());
+  }
+  grpc_channel_credentials* c_creds = grpc_alts_credentials_create(c_options);
+  grpc_alts_credentials_options_destroy(c_options);
+  return WrapChannelCredentials(c_creds);
+}
+
+// Builds Local Credentials
+std::shared_ptr<ChannelCredentials> LocalCredentials(
+    grpc_local_connect_type type) {
+  GrpcLibraryCodegen init;  // To call grpc_init().
+  return WrapChannelCredentials(grpc_local_credentials_create(type));
+}
+
+}  // namespace experimental
 
 // Builds credentials for use when running in GCE
 std::shared_ptr<CallCredentials> GoogleComputeEngineCredentials() {
@@ -189,9 +231,10 @@ int MetadataCredentialsPluginWrapper::GetMetadata(
   }
   if (w->plugin_->IsBlocking()) {
     // Asynchronous return.
-    w->thread_pool_->Add(
-        std::bind(&MetadataCredentialsPluginWrapper::InvokePlugin, w, context,
-                  cb, user_data, nullptr, nullptr, nullptr, nullptr));
+    w->thread_pool_->Add([w, context, cb, user_data] {
+      w->MetadataCredentialsPluginWrapper::InvokePlugin(
+          context, cb, user_data, nullptr, nullptr, nullptr, nullptr);
+    });
     return 0;
   } else {
     // Synchronous return.

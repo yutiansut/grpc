@@ -14,7 +14,7 @@
 
 licenses(["notice"])  # Apache v2
 
-load("//bazel:grpc_build_system.bzl", "grpc_cc_library", "grpc_cc_test", "grpc_package", "grpc_cc_binary")
+load("//bazel:grpc_build_system.bzl", "grpc_cc_binary", "grpc_cc_library", "grpc_cc_test", "grpc_package")
 
 grpc_package(
     name = "test/cpp/end2end",
@@ -26,6 +26,20 @@ grpc_cc_library(
     testonly = True,
     srcs = ["test_service_impl.cc"],
     hdrs = ["test_service_impl.h"],
+    external_deps = [
+        "gtest",
+    ],
+    deps = [
+        "//src/proto/grpc/testing:echo_proto",
+        "//test/cpp/util:test_util",
+    ],
+)
+
+grpc_cc_library(
+    name = "interceptors_util",
+    testonly = True,
+    srcs = ["interceptors_util.cc"],
+    hdrs = ["interceptors_util.h"],
     external_deps = [
         "gtest",
     ],
@@ -98,10 +112,9 @@ grpc_cc_binary(
     ],
 )
 
-grpc_cc_library(
-    name = "end2end_test_lib",
-    testonly = True,
-    srcs = ["end2end_test.cc"],
+grpc_cc_test(
+    name = "client_callback_end2end_test",
+    srcs = ["client_callback_end2end_test.cc"],
     external_deps = [
         "gtest",
     ],
@@ -112,7 +125,69 @@ grpc_cc_library(
         "//:grpc++",
         "//src/proto/grpc/testing:echo_messages_proto",
         "//src/proto/grpc/testing:echo_proto",
+        "//test/core/util:gpr_test_util",
+        "//test/core/util:grpc_test_util",
+        "//test/cpp/util:test_util",
+    ],
+)
+
+grpc_cc_test(
+    name = "client_interceptors_end2end_test",
+    srcs = ["client_interceptors_end2end_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
+    deps = [
+        ":interceptors_util",
+        ":test_service_impl",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//src/proto/grpc/testing:echo_messages_proto",
+        "//src/proto/grpc/testing:echo_proto",
+        "//test/core/util:gpr_test_util",
+        "//test/core/util:grpc_test_util",
+        "//test/cpp/util:test_util",
+    ],
+)
+
+grpc_cc_library(
+    name = "end2end_test_lib",
+    testonly = True,
+    srcs = ["end2end_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
+    deps = [
+        ":interceptors_util",
+        ":test_service_impl",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//src/proto/grpc/testing:echo_messages_proto",
+        "//src/proto/grpc/testing:echo_proto",
         "//src/proto/grpc/testing/duplicate:echo_duplicate_proto",
+        "//test/core/util:gpr_test_util",
+        "//test/core/util:grpc_test_util",
+        "//test/cpp/util:test_util",
+    ],
+)
+
+grpc_cc_test(
+    name = "channelz_service_test",
+    srcs = ["channelz_service_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
+    deps = [
+        ":test_service_impl",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//:grpcpp_channelz",
+        "//src/proto/grpc/channelz:channelz_proto",
+        "//src/proto/grpc/testing:echo_messages_proto",
+        "//src/proto/grpc/testing:echo_proto",
         "//test/core/util:gpr_test_util",
         "//test/core/util:grpc_test_util",
         "//test/cpp/util:test_util",
@@ -224,6 +299,26 @@ grpc_cc_test(
 grpc_cc_test(
     name = "hybrid_end2end_test",
     srcs = ["hybrid_end2end_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
+    deps = [
+        ":test_service_impl",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//src/proto/grpc/testing:echo_messages_proto",
+        "//src/proto/grpc/testing:echo_proto",
+        "//src/proto/grpc/testing/duplicate:echo_duplicate_proto",
+        "//test/core/util:gpr_test_util",
+        "//test/core/util:grpc_test_util",
+        "//test/cpp/util:test_util",
+    ],
+)
+
+grpc_cc_test(
+    name = "raw_end2end_test",
+    srcs = ["raw_end2end_test.cc"],
     external_deps = [
         "gtest",
     ],
@@ -405,6 +500,40 @@ grpc_cc_binary(
         "//src/proto/grpc/testing/duplicate:echo_duplicate_proto",
         "//test/core/util:gpr_test_util",
         "//test/core/util:grpc_test_util",
+        "//test/cpp/util:test_util",
+    ],
+)
+
+grpc_cc_test(
+    name = "server_interceptors_end2end_test",
+    srcs = ["server_interceptors_end2end_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
+    deps = [
+        ":interceptors_util",
+        ":test_service_impl",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//src/proto/grpc/testing:echo_messages_proto",
+        "//src/proto/grpc/testing:echo_proto",
+        "//test/core/util:gpr_test_util",
+        "//test/core/util:grpc_test_util",
+        "//test/cpp/util:test_util",
+    ],
+)
+
+grpc_cc_test(
+    name = "server_load_reporting_end2end_test",
+    srcs = ["server_load_reporting_end2end_test.cc"],
+    external_deps = [
+        "gtest",
+        "gmock",
+    ],
+    deps = [
+        "//:grpcpp_server_load_reporting",
+        "//src/proto/grpc/testing:echo_proto",
         "//test/cpp/util:test_util",
     ],
 )

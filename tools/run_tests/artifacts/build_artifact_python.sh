@@ -17,11 +17,15 @@ set -ex
 
 cd "$(dirname "$0")/../../.."
 
-export GRPC_PYTHON_USE_CUSTOM_BDIST=0
 export GRPC_PYTHON_BUILD_WITH_CYTHON=1
 export PYTHON=${PYTHON:-python}
 export PIP=${PIP:-pip}
 export AUDITWHEEL=${AUDITWHEEL:-auditwheel}
+
+# Allow build_ext to build C/C++ files in parallel
+# by enabling a monkeypatch. It speeds up the build a lot.
+# Use externally provided GRPC_PYTHON_BUILD_EXT_COMPILER_JOBS value if set.
+export GRPC_PYTHON_BUILD_EXT_COMPILER_JOBS=${GRPC_PYTHON_BUILD_EXT_COMPILER_JOBS:-2}
 
 mkdir -p "${ARTIFACTS_OUT}"
 ARTIFACT_DIR="$PWD/${ARTIFACTS_OUT}"
@@ -91,15 +95,25 @@ fi
 if [ "$GRPC_BUILD_GRPCIO_TOOLS_DEPENDENTS" != "" ]
 then
   "${PIP}" install -rrequirements.txt
+
+  if [ "$("$PYTHON" -c "import sys; print(sys.version_info[0])")" == "2" ]
+  then
+    "${PIP}" install futures>=2.2.0
+  fi
+
   "${PIP}" install grpcio --no-index --find-links "file://$ARTIFACT_DIR/"
   "${PIP}" install grpcio-tools --no-index --find-links "file://$ARTIFACT_DIR/"
 
-  # Build gRPC health-checking source distribution
+  # Build grpcio_testing source distribution
+  ${SETARCH_CMD} "${PYTHON}" src/python/grpcio_testing/setup.py sdist
+  cp -r src/python/grpcio_testing/dist/* "$ARTIFACT_DIR"
+
+  # Build grpcio_health_checking source distribution
   ${SETARCH_CMD} "${PYTHON}" src/python/grpcio_health_checking/setup.py \
       preprocess build_package_protos sdist
   cp -r src/python/grpcio_health_checking/dist/* "$ARTIFACT_DIR"
 
-  # Build gRPC reflection source distribution
+  # Build grpcio_reflection source distribution
   ${SETARCH_CMD} "${PYTHON}" src/python/grpcio_reflection/setup.py \
       preprocess build_package_protos sdist
   cp -r src/python/grpcio_reflection/dist/* "$ARTIFACT_DIR"

@@ -11,10 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# distutils: language=c++
 
 cimport cpython
 
-import pkg_resources
 import os.path
 import sys
 
@@ -34,6 +34,14 @@ include "_cygrpc/security.pyx.pxi"
 include "_cygrpc/server.pyx.pxi"
 include "_cygrpc/tag.pyx.pxi"
 include "_cygrpc/time.pyx.pxi"
+include "_cygrpc/_hooks.pyx.pxi"
+
+include "_cygrpc/grpc_gevent.pyx.pxi"
+
+IF UNAME_SYSNAME == "Windows":
+    include "_cygrpc/fork_windows.pyx.pxi"
+ELSE:
+    include "_cygrpc/fork_posix.pyx.pxi"
 
 #
 # initialize gRPC

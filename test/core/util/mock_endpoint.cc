@@ -55,7 +55,7 @@ static void me_read(grpc_endpoint* ep, grpc_slice_buffer* slices,
 }
 
 static void me_write(grpc_endpoint* ep, grpc_slice_buffer* slices,
-                     grpc_closure* cb) {
+                     grpc_closure* cb, void* arg) {
   mock_endpoint* m = reinterpret_cast<mock_endpoint*>(ep);
   for (size_t i = 0; i < slices->count; i++) {
     m->on_write(slices->slices[i]);
@@ -103,18 +103,19 @@ static grpc_resource_user* me_get_resource_user(grpc_endpoint* ep) {
 
 static int me_get_fd(grpc_endpoint* ep) { return -1; }
 
-static const grpc_endpoint_vtable vtable = {
-    me_read,
-    me_write,
-    me_add_to_pollset,
-    me_add_to_pollset_set,
-    me_delete_from_pollset_set,
-    me_shutdown,
-    me_destroy,
-    me_get_resource_user,
-    me_get_peer,
-    me_get_fd,
-};
+static bool me_can_track_err(grpc_endpoint* ep) { return false; }
+
+static const grpc_endpoint_vtable vtable = {me_read,
+                                            me_write,
+                                            me_add_to_pollset,
+                                            me_add_to_pollset_set,
+                                            me_delete_from_pollset_set,
+                                            me_shutdown,
+                                            me_destroy,
+                                            me_get_resource_user,
+                                            me_get_peer,
+                                            me_get_fd,
+                                            me_can_track_err};
 
 grpc_endpoint* grpc_mock_endpoint_create(void (*on_write)(grpc_slice slice),
                                          grpc_resource_quota* resource_quota) {

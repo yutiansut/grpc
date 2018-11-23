@@ -34,7 +34,6 @@
 #include "src/core/ext/filters/http/client/http_client_filter.h"
 #include "src/core/ext/filters/http/message_compress/message_compress_filter.h"
 #include "src/core/ext/filters/http/server/http_server_filter.h"
-#include "src/core/ext/filters/load_reporting/server_load_reporting_filter.h"
 #include "src/core/ext/filters/message_size/message_size_filter.h"
 #include "src/core/lib/channel/channel_stack.h"
 #include "src/core/lib/channel/connected_channel.h"
@@ -46,6 +45,7 @@
 #include "src/cpp/client/create_channel_internal.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
 #include "test/cpp/microbenchmarks/helpers.h"
+#include "test/cpp/util/test_config.h"
 
 auto& force_library_initialization = Library::get();
 
@@ -132,8 +132,11 @@ static void BM_LameChannelCallCreateCpp(benchmark::State& state) {
   TrackCounters track_counters;
   auto stub =
       grpc::testing::EchoTestService::NewStub(grpc::CreateChannelInternal(
-          "", grpc_lame_client_channel_create(
-                  "localhost:1234", GRPC_STATUS_UNAUTHENTICATED, "blah")));
+          "",
+          grpc_lame_client_channel_create("localhost:1234",
+                                          GRPC_STATUS_UNAUTHENTICATED, "blah"),
+          std::vector<std::unique_ptr<
+              grpc::experimental::ClientInterceptorFactoryInterface>>()));
   grpc::CompletionQueue cq;
   grpc::testing::EchoRequest send_request;
   grpc::testing::EchoResponse recv_response;
@@ -466,7 +469,7 @@ class NoOp {
 
 class SendEmptyMetadata {
  public:
-  SendEmptyMetadata() {
+  SendEmptyMetadata() : op_payload_(nullptr) {
     memset(&op_, 0, sizeof(op_));
     op_.on_complete = GRPC_CLOSURE_INIT(&closure_, DoNothing, nullptr,
                                         grpc_schedule_on_exec_ctx);
@@ -603,10 +606,13 @@ BENCHMARK_TEMPLATE(BM_IsolatedFilter, HttpServerFilter, SendEmptyMetadata);
 typedef Fixture<&grpc_message_size_filter, CHECKS_NOT_LAST> MessageSizeFilter;
 BENCHMARK_TEMPLATE(BM_IsolatedFilter, MessageSizeFilter, NoOp);
 BENCHMARK_TEMPLATE(BM_IsolatedFilter, MessageSizeFilter, SendEmptyMetadata);
-typedef Fixture<&grpc_server_load_reporting_filter, CHECKS_NOT_LAST>
-    LoadReportingFilter;
-BENCHMARK_TEMPLATE(BM_IsolatedFilter, LoadReportingFilter, NoOp);
-BENCHMARK_TEMPLATE(BM_IsolatedFilter, LoadReportingFilter, SendEmptyMetadata);
+// This cmake target is disabled for now because it depends on OpenCensus, which
+// is Bazel-only.
+// typedef Fixture<&grpc_server_load_reporting_filter, CHECKS_NOT_LAST>
+//    LoadReportingFilter;
+// BENCHMARK_TEMPLATE(BM_IsolatedFilter, LoadReportingFilter, NoOp);
+// BENCHMARK_TEMPLATE(BM_IsolatedFilter, LoadReportingFilter,
+// SendEmptyMetadata);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Benchmarks isolating grpc_call
@@ -620,18 +626,26 @@ typedef struct {
 static void StartTransportStreamOp(grpc_call_element* elem,
                                    grpc_transport_stream_op_batch* op) {
   call_data* calld = static_cast<call_data*>(elem->call_data);
+  // Construct list of closures to return.
+  grpc_core::CallCombinerClosureList closures;
   if (op->recv_initial_metadata) {
-    GRPC_CALL_COMBINER_START(
-        calld->call_combiner,
-        op->payload->recv_initial_metadata.recv_initial_metadata_ready,
-        GRPC_ERROR_NONE, "recv_initial_metadata");
+    closures.Add(op->payload->recv_initial_metadata.recv_initial_metadata_ready,
+                 GRPC_ERROR_NONE, "recv_initial_metadata");
   }
   if (op->recv_message) {
-    GRPC_CALL_COMBINER_START(calld->call_combiner,
-                             op->payload->recv_message.recv_message_ready,
-                             GRPC_ERROR_NONE, "recv_message");
+    closures.Add(op->payload->recv_message.recv_message_ready, GRPC_ERROR_NONE,
+                 "recv_message");
   }
-  GRPC_CLOSURE_SCHED(op->on_complete, GRPC_ERROR_NONE);
+  if (op->recv_trailing_metadata) {
+    closures.Add(
+        op->payload->recv_trailing_metadata.recv_trailing_metadata_ready,
+        GRPC_ERROR_NONE, "recv_trailing_metadata");
+  }
+  if (op->on_complete != nullptr) {
+    closures.Add(op->on_complete, GRPC_ERROR_NONE, "on_complete");
+  }
+  // Execute closures.
+  closures.RunClosures(calld->call_combiner);
 }
 
 static void StartTransportOp(grpc_channel_element* elem,
@@ -813,4 +827,15 @@ static void BM_IsolatedCall_StreamingSend(benchmark::State& state) {
 }
 BENCHMARK(BM_IsolatedCall_StreamingSend);
 
-BENCHMARK_MAIN();
+// Some distros have RunSpecifiedBenchmarks under the benchmark namespace,
+// and others do not. This allows us to support both modes.
+namespace benchmark {
+void RunTheBenchmarksNamespaced() { RunSpecifiedBenchmarks(); }
+}  // namespace benchmark
+
+int main(int argc, char** argv) {
+  ::benchmark::Initialize(&argc, argv);
+  ::grpc::testing::InitTest(&argc, &argv, false);
+  benchmark::RunTheBenchmarksNamespaced();
+  return 0;
+}

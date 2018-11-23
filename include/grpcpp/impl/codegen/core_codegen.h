@@ -63,6 +63,9 @@ class CoreCodegen final : public CoreCodegenInterface {
   void gpr_cv_signal(gpr_cv* cv) override;
   void gpr_cv_broadcast(gpr_cv* cv) override;
 
+  grpc_call_error grpc_call_start_batch(grpc_call* call, const grpc_op* ops,
+                                        size_t nops, void* tag,
+                                        void* reserved) override;
   grpc_call_error grpc_call_cancel_with_status(grpc_call* call,
                                                grpc_status_code status,
                                                const char* description,
@@ -73,6 +76,7 @@ class CoreCodegen final : public CoreCodegenInterface {
 
   grpc_byte_buffer* grpc_byte_buffer_copy(grpc_byte_buffer* bb) override;
   void grpc_byte_buffer_destroy(grpc_byte_buffer* bb) override;
+  size_t grpc_byte_buffer_length(grpc_byte_buffer* bb) override;
 
   int grpc_byte_buffer_reader_init(grpc_byte_buffer_reader* reader,
                                    grpc_byte_buffer* buffer) override;
@@ -86,6 +90,8 @@ class CoreCodegen final : public CoreCodegenInterface {
   grpc_slice grpc_slice_new_with_user_data(void* p, size_t len,
                                            void (*destroy)(void*),
                                            void* user_data) override;
+  grpc_slice grpc_slice_new_with_len(void* p, size_t len,
+                                     void (*destroy)(void*, size_t)) override;
   grpc_slice grpc_empty_slice() override;
   grpc_slice grpc_slice_malloc(size_t length) override;
   void grpc_slice_unref(grpc_slice slice) override;

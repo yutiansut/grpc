@@ -126,9 +126,10 @@ class ClientAsyncResponseReader final
     assert(started_);
     GPR_CODEGEN_ASSERT(!context_->initial_metadata_received_);
 
-    meta_buf.set_output_tag(tag);
-    meta_buf.RecvInitialMetadata(context_);
-    call_.PerformOps(&meta_buf);
+    single_buf.set_output_tag(tag);
+    single_buf.RecvInitialMetadata(context_);
+    call_.PerformOps(&single_buf);
+    initial_metadata_read_ = true;
   }
 
   /// See \a ClientAysncResponseReaderInterface::Finish for semantics.
@@ -138,14 +139,20 @@ class ClientAsyncResponseReader final
   ///     possible initial and trailing metadata sent from the server.
   void Finish(R* msg, Status* status, void* tag) override {
     assert(started_);
-    finish_buf.set_output_tag(tag);
-    if (!context_->initial_metadata_received_) {
-      finish_buf.RecvInitialMetadata(context_);
+    if (initial_metadata_read_) {
+      finish_buf.set_output_tag(tag);
+      finish_buf.RecvMessage(msg);
+      finish_buf.AllowNoMessage();
+      finish_buf.ClientRecvStatus(context_, status);
+      call_.PerformOps(&finish_buf);
+    } else {
+      single_buf.set_output_tag(tag);
+      single_buf.RecvInitialMetadata(context_);
+      single_buf.RecvMessage(msg);
+      single_buf.AllowNoMessage();
+      single_buf.ClientRecvStatus(context_, status);
+      call_.PerformOps(&single_buf);
     }
-    finish_buf.RecvMessage(msg);
-    finish_buf.AllowNoMessage();
-    finish_buf.ClientRecvStatus(context_, status);
-    call_.PerformOps(&finish_buf);
   }
 
  private:
@@ -153,6 +160,7 @@ class ClientAsyncResponseReader final
   ClientContext* const context_;
   ::grpc::internal::Call call_;
   bool started_;
+  bool initial_metadata_read_ = false;
 
   template <class W>
   ClientAsyncResponseReader(::grpc::internal::Call call, ClientContext* context,
@@ -160,29 +168,28 @@ class ClientAsyncResponseReader final
       : context_(context), call_(call), started_(start) {
     // Bind the metadata at time of StartCallInternal but set up the rest here
     // TODO(ctiller): don't assert
-    GPR_CODEGEN_ASSERT(init_buf.SendMessage(request).ok());
-    init_buf.ClientSendClose();
+    GPR_CODEGEN_ASSERT(single_buf.SendMessage(request).ok());
+    single_buf.ClientSendClose();
     if (start) StartCallInternal();
   }
 
   void StartCallInternal() {
-    init_buf.SendInitialMetadata(context_->send_initial_metadata_,
-                                 context_->initial_metadata_flags());
-    call_.PerformOps(&init_buf);
+    single_buf.SendInitialMetadata(&context_->send_initial_metadata_,
+                                   context_->initial_metadata_flags());
   }
 
   // disable operator new
   static void* operator new(std::size_t size);
   static void* operator new(std::size_t size, void* p) { return p; }
 
-  ::grpc::internal::SneakyCallOpSet<::grpc::internal::CallOpSendInitialMetadata,
-                                    ::grpc::internal::CallOpSendMessage,
-                                    ::grpc::internal::CallOpClientSendClose>
-      init_buf;
-  ::grpc::internal::CallOpSet<::grpc::internal::CallOpRecvInitialMetadata>
-      meta_buf;
-  ::grpc::internal::CallOpSet<::grpc::internal::CallOpRecvInitialMetadata,
+  ::grpc::internal::CallOpSet<::grpc::internal::CallOpSendInitialMetadata,
+                              ::grpc::internal::CallOpSendMessage,
+                              ::grpc::internal::CallOpClientSendClose,
+                              ::grpc::internal::CallOpRecvInitialMetadata,
                               ::grpc::internal::CallOpRecvMessage<R>,
+                              ::grpc::internal::CallOpClientRecvStatus>
+      single_buf;
+  ::grpc::internal::CallOpSet<::grpc::internal::CallOpRecvMessage<R>,
                               ::grpc::internal::CallOpClientRecvStatus>
       finish_buf;
 };
@@ -207,7 +214,7 @@ class ServerAsyncResponseWriter final
     GPR_CODEGEN_ASSERT(!ctx_->sent_initial_metadata_);
 
     meta_buf_.set_output_tag(tag);
-    meta_buf_.SendInitialMetadata(ctx_->initial_metadata_,
+    meta_buf_.SendInitialMetadata(&ctx_->initial_metadata_,
                                   ctx_->initial_metadata_flags());
     if (ctx_->compression_level_set()) {
       meta_buf_.set_compression_level(ctx_->compression_level());
@@ -233,8 +240,9 @@ class ServerAsyncResponseWriter final
   /// metadata.
   void Finish(const W& msg, const Status& status, void* tag) {
     finish_buf_.set_output_tag(tag);
+    finish_buf_.set_core_cq_tag(&finish_buf_);
     if (!ctx_->sent_initial_metadata_) {
-      finish_buf_.SendInitialMetadata(ctx_->initial_metadata_,
+      finish_buf_.SendInitialMetadata(&ctx_->initial_metadata_,
                                       ctx_->initial_metadata_flags());
       if (ctx_->compression_level_set()) {
         finish_buf_.set_compression_level(ctx_->compression_level());
@@ -243,10 +251,10 @@ class ServerAsyncResponseWriter final
     }
     // The response is dropped if the status is not OK.
     if (status.ok()) {
-      finish_buf_.ServerSendStatus(ctx_->trailing_metadata_,
+      finish_buf_.ServerSendStatus(&ctx_->trailing_metadata_,
                                    finish_buf_.SendMessage(msg));
     } else {
-      finish_buf_.ServerSendStatus(ctx_->trailing_metadata_, status);
+      finish_buf_.ServerSendStatus(&ctx_->trailing_metadata_, status);
     }
     call_.PerformOps(&finish_buf_);
   }
@@ -267,14 +275,14 @@ class ServerAsyncResponseWriter final
     GPR_CODEGEN_ASSERT(!status.ok());
     finish_buf_.set_output_tag(tag);
     if (!ctx_->sent_initial_metadata_) {
-      finish_buf_.SendInitialMetadata(ctx_->initial_metadata_,
+      finish_buf_.SendInitialMetadata(&ctx_->initial_metadata_,
                                       ctx_->initial_metadata_flags());
       if (ctx_->compression_level_set()) {
         finish_buf_.set_compression_level(ctx_->compression_level());
       }
       ctx_->sent_initial_metadata_ = true;
     }
-    finish_buf_.ServerSendStatus(ctx_->trailing_metadata_, status);
+    finish_buf_.ServerSendStatus(&ctx_->trailing_metadata_, status);
     call_.PerformOps(&finish_buf_);
   }
 

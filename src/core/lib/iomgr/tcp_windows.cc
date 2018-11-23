@@ -51,9 +51,9 @@
 #define GRPC_FIONBIO FIONBIO
 #endif
 
-grpc_core::TraceFlag grpc_tcp_trace(false, "tcp");
+extern grpc_core::TraceFlag grpc_tcp_trace;
 
-static grpc_error* set_non_block(SOCKET sock) {
+grpc_error* grpc_tcp_set_non_block(SOCKET sock) {
   int status;
   uint32_t param = 1;
   DWORD ret;
@@ -74,11 +74,27 @@ static grpc_error* set_dualstack(SOCKET sock) {
              : GRPC_WSA_ERROR(WSAGetLastError(), "setsockopt(IPV6_V6ONLY)");
 }
 
+static grpc_error* enable_loopback_fast_path(SOCKET sock) {
+  int status;
+  uint32_t param = 1;
+  DWORD ret;
+  status = WSAIoctl(sock, /*SIO_LOOPBACK_FAST_PATH==*/_WSAIOW(IOC_VENDOR, 16),
+                    &param, sizeof(param), NULL, 0, &ret, 0, 0);
+  if (status == SOCKET_ERROR) {
+    status = WSAGetLastError();
+  }
+  return status == 0 || status == WSAEOPNOTSUPP
+             ? GRPC_ERROR_NONE
+             : GRPC_WSA_ERROR(status, "WSAIoctl(SIO_LOOPBACK_FAST_PATH)");
+}
+
 grpc_error* grpc_tcp_prepare_socket(SOCKET sock) {
   grpc_error* err;
-  err = set_non_block(sock);
+  err = grpc_tcp_set_non_block(sock);
   if (err != GRPC_ERROR_NONE) return err;
   err = set_dualstack(sock);
+  if (err != GRPC_ERROR_NONE) return err;
+  err = enable_loopback_fast_path(sock);
   if (err != GRPC_ERROR_NONE) return err;
   return GRPC_ERROR_NONE;
 }
@@ -280,7 +296,7 @@ static void on_write(void* tcpp, grpc_error* error) {
 
 /* Initiates a write. */
 static void win_write(grpc_endpoint* ep, grpc_slice_buffer* slices,
-                      grpc_closure* cb) {
+                      grpc_closure* cb, void* arg) {
   grpc_tcp* tcp = (grpc_tcp*)ep;
   grpc_winsocket* socket = tcp->socket;
   grpc_winsocket_callback_info* info = &socket->write_info;
@@ -411,6 +427,8 @@ static grpc_resource_user* win_get_resource_user(grpc_endpoint* ep) {
 
 static int win_get_fd(grpc_endpoint* ep) { return -1; }
 
+static bool win_can_track_err(grpc_endpoint* ep) { return false; }
+
 static grpc_endpoint_vtable vtable = {win_read,
                                       win_write,
                                       win_add_to_pollset,
@@ -420,7 +438,8 @@ static grpc_endpoint_vtable vtable = {win_read,
                                       win_destroy,
                                       win_get_resource_user,
                                       win_get_peer,
-                                      win_get_fd};
+                                      win_get_fd,
+                                      win_can_track_err};
 
 grpc_endpoint* grpc_tcp_create(grpc_winsocket* socket,
                                grpc_channel_args* channel_args,

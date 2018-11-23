@@ -18,6 +18,7 @@
 
 /* Microbenchmarks around CHTTP2 transport operations */
 
+#include <benchmark/benchmark.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
 #include <grpc/support/string_util.h>
@@ -33,7 +34,7 @@
 #include "src/core/lib/slice/slice_internal.h"
 #include "src/core/lib/transport/static_metadata.h"
 #include "test/cpp/microbenchmarks/helpers.h"
-#include "third_party/benchmark/include/benchmark/benchmark.h"
+#include "test/cpp/util/test_config.h"
 
 auto& force_library_initialization = Library::get();
 
@@ -53,7 +54,8 @@ class DummyEndpoint : public grpc_endpoint {
                                                    destroy,
                                                    get_resource_user,
                                                    get_peer,
-                                                   get_fd};
+                                                   get_fd,
+                                                   can_track_err};
     grpc_endpoint::vtable = &my_vtable;
     ru_ = grpc_resource_user_create(Library::get().rq(), "dummy_endpoint");
   }
@@ -95,7 +97,7 @@ class DummyEndpoint : public grpc_endpoint {
   }
 
   static void write(grpc_endpoint* ep, grpc_slice_buffer* slices,
-                    grpc_closure* cb) {
+                    grpc_closure* cb, void* arg) {
     GRPC_CLOSURE_SCHED(cb, GRPC_ERROR_NONE);
   }
 
@@ -124,6 +126,7 @@ class DummyEndpoint : public grpc_endpoint {
   }
   static char* get_peer(grpc_endpoint* ep) { return gpr_strdup("test"); }
   static int get_fd(grpc_endpoint* ep) { return 0; }
+  static bool can_track_err(grpc_endpoint* ep) { return false; }
 };
 
 class Fixture {
@@ -261,7 +264,7 @@ static void BM_StreamCreateDestroy(benchmark::State& state) {
   Fixture f(grpc::ChannelArguments(), true);
   Stream s(&f);
   grpc_transport_stream_op_batch op;
-  grpc_transport_stream_op_batch_payload op_payload;
+  grpc_transport_stream_op_batch_payload op_payload(nullptr);
   memset(&op, 0, sizeof(op));
   op.cancel_stream = true;
   op.payload = &op_payload;
@@ -307,8 +310,7 @@ static void BM_StreamCreateSendInitialMetadataDestroy(benchmark::State& state) {
   Fixture f(grpc::ChannelArguments(), true);
   Stream s(&f);
   grpc_transport_stream_op_batch op;
-  grpc_transport_stream_op_batch_payload op_payload;
-  memset(&op_payload, 0, sizeof(op_payload));
+  grpc_transport_stream_op_batch_payload op_payload(nullptr);
   std::unique_ptr<Closure> start;
   std::unique_ptr<Closure> done;
 
@@ -359,8 +361,7 @@ static void BM_TransportEmptyOp(benchmark::State& state) {
   Stream s(&f);
   s.Init(state);
   grpc_transport_stream_op_batch op;
-  grpc_transport_stream_op_batch_payload op_payload;
-  memset(&op_payload, 0, sizeof(op_payload));
+  grpc_transport_stream_op_batch_payload op_payload(nullptr);
   auto reset_op = [&]() {
     memset(&op, 0, sizeof(op));
     op.payload = &op_payload;
@@ -392,19 +393,18 @@ static void BM_TransportStreamSend(benchmark::State& state) {
   auto s = std::unique_ptr<Stream>(new Stream(&f));
   s->Init(state);
   grpc_transport_stream_op_batch op;
-  grpc_transport_stream_op_batch_payload op_payload;
-  memset(&op_payload, 0, sizeof(op_payload));
+  grpc_transport_stream_op_batch_payload op_payload(nullptr);
   auto reset_op = [&]() {
     memset(&op, 0, sizeof(op));
     op.payload = &op_payload;
   };
-  grpc_slice_buffer_stream send_stream;
-  grpc_slice_buffer send_buffer;
-  grpc_slice_buffer_init(&send_buffer);
-  grpc_slice_buffer_add(&send_buffer, gpr_slice_malloc(state.range(0)));
-  memset(GRPC_SLICE_START_PTR(send_buffer.slices[0]), 0,
-         GRPC_SLICE_LENGTH(send_buffer.slices[0]));
-
+  // Create the send_message payload slice.
+  // Note: We use grpc_slice_malloc_large() instead of grpc_slice_malloc()
+  // to force the slice to be refcounted, so that it remains alive when it
+  // is unreffed after each send_message op.
+  grpc_slice send_slice = grpc_slice_malloc_large(state.range(0));
+  memset(GRPC_SLICE_START_PTR(send_slice), 0, GRPC_SLICE_LENGTH(send_slice));
+  grpc_core::ManualConstructor<grpc_core::SliceBufferByteStream> send_stream;
   grpc_metadata_batch b;
   grpc_metadata_batch_init(&b);
   b.deadline = GRPC_MILLIS_INF_FUTURE;
@@ -424,14 +424,18 @@ static void BM_TransportStreamSend(benchmark::State& state) {
       gpr_event_set(bm_done, (void*)1);
       return;
     }
+    grpc_slice_buffer send_buffer;
+    grpc_slice_buffer_init(&send_buffer);
+    grpc_slice_buffer_add(&send_buffer, grpc_slice_ref(send_slice));
+    send_stream.Init(&send_buffer, 0);
+    grpc_slice_buffer_destroy(&send_buffer);
     // force outgoing window to be yuge
     s->chttp2_stream()->flow_control->TestOnlyForceHugeWindow();
     f.chttp2_transport()->flow_control->TestOnlyForceHugeWindow();
-    grpc_slice_buffer_stream_init(&send_stream, &send_buffer, 0);
     reset_op();
     op.on_complete = c.get();
     op.send_message = true;
-    op.payload->send_message.send_message = &send_stream.base;
+    op.payload->send_message.send_message.reset(send_stream.get());
     s->Op(&op);
   });
 
@@ -454,7 +458,7 @@ static void BM_TransportStreamSend(benchmark::State& state) {
   s.reset();
   track_counters.Finish(state);
   grpc_metadata_batch_destroy(&b);
-  grpc_slice_buffer_destroy(&send_buffer);
+  grpc_slice_unref(send_slice);
 }
 BENCHMARK(BM_TransportStreamSend)->Range(0, 128 * 1024 * 1024);
 
@@ -521,10 +525,9 @@ static void BM_TransportStreamRecv(benchmark::State& state) {
   Fixture f(grpc::ChannelArguments(), true);
   Stream s(&f);
   s.Init(state);
-  grpc_transport_stream_op_batch_payload op_payload;
-  memset(&op_payload, 0, sizeof(op_payload));
+  grpc_transport_stream_op_batch_payload op_payload(nullptr);
   grpc_transport_stream_op_batch op;
-  grpc_byte_stream* recv_stream;
+  grpc_core::OrphanablePtr<grpc_core::ByteStream> recv_stream;
   grpc_slice incoming_data = CreateIncomingDataSlice(state.range(0), 16384);
 
   auto reset_op = [&]() {
@@ -579,21 +582,20 @@ static void BM_TransportStreamRecv(benchmark::State& state) {
 
   drain = MakeClosure([&](grpc_error* error) {
     do {
-      if (received == recv_stream->length) {
-        grpc_byte_stream_destroy(recv_stream);
+      if (received == recv_stream->length()) {
+        recv_stream.reset();
         GRPC_CLOSURE_SCHED(c.get(), GRPC_ERROR_NONE);
         return;
       }
-    } while (grpc_byte_stream_next(recv_stream, recv_stream->length - received,
-                                   drain_continue.get()) &&
-             GRPC_ERROR_NONE ==
-                 grpc_byte_stream_pull(recv_stream, &recv_slice) &&
+    } while (recv_stream->Next(recv_stream->length() - received,
+                               drain_continue.get()) &&
+             GRPC_ERROR_NONE == recv_stream->Pull(&recv_slice) &&
              (received += GRPC_SLICE_LENGTH(recv_slice),
               grpc_slice_unref_internal(recv_slice), true));
   });
 
   drain_continue = MakeClosure([&](grpc_error* error) {
-    grpc_byte_stream_pull(recv_stream, &recv_slice);
+    recv_stream->Pull(&recv_slice);
     received += GRPC_SLICE_LENGTH(recv_slice);
     grpc_slice_unref_internal(recv_slice);
     GRPC_CLOSURE_RUN(drain.get(), GRPC_ERROR_NONE);
@@ -635,4 +637,15 @@ static void BM_TransportStreamRecv(benchmark::State& state) {
 }
 BENCHMARK(BM_TransportStreamRecv)->Range(0, 128 * 1024 * 1024);
 
-BENCHMARK_MAIN();
+// Some distros have RunSpecifiedBenchmarks under the benchmark namespace,
+// and others do not. This allows us to support both modes.
+namespace benchmark {
+void RunTheBenchmarksNamespaced() { RunSpecifiedBenchmarks(); }
+}  // namespace benchmark
+
+int main(int argc, char** argv) {
+  ::benchmark::Initialize(&argc, argv);
+  ::grpc::testing::InitTest(&argc, &argv, false);
+  benchmark::RunTheBenchmarksNamespaced();
+  return 0;
+}

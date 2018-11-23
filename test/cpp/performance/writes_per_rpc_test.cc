@@ -100,7 +100,7 @@ class EndpointPairFixture {
       }
 
       grpc_server_setup_transport(server_->c_server(), transport, nullptr,
-                                  server_args);
+                                  server_args, 0);
       grpc_chttp2_transport_start_reading(transport, nullptr, nullptr);
     }
 
@@ -118,7 +118,10 @@ class EndpointPairFixture {
           "target", &c_args, GRPC_CLIENT_DIRECT_CHANNEL, transport);
       grpc_chttp2_transport_start_reading(transport, nullptr, nullptr);
 
-      channel_ = CreateChannelInternal("", channel);
+      channel_ = CreateChannelInternal(
+          "", channel,
+          std::vector<std::unique_ptr<
+              experimental::ClientInterceptorFactoryInterface>>());
     }
   }
 
@@ -207,13 +210,13 @@ static double UnaryPingPong(int request_size, int response_size) {
         stub->AsyncEcho(&cli_ctx, send_request, fixture->cq()));
     void* t;
     bool ok;
+    response_reader->Finish(&recv_response, &recv_status, tag(4));
     GPR_ASSERT(fixture->cq()->Next(&t, &ok));
     GPR_ASSERT(ok);
     GPR_ASSERT(t == tag(0) || t == tag(1));
     intptr_t slot = reinterpret_cast<intptr_t>(t);
     ServerEnv* senv = server_env[slot];
     senv->response_writer.Finish(send_response, Status::OK, tag(3));
-    response_reader->Finish(&recv_response, &recv_status, tag(4));
     for (int i = (1 << 3) | (1 << 4); i != 0;) {
       GPR_ASSERT(fixture->cq()->Next(&t, &ok));
       GPR_ASSERT(ok);

@@ -43,9 +43,10 @@ void AuthMetadataProcessorAyncWrapper::Process(
     return;
   }
   if (w->processor_->IsBlocking()) {
-    w->thread_pool_->Add(
-        std::bind(&AuthMetadataProcessorAyncWrapper::InvokeProcessor, w,
-                  context, md, num_md, cb, user_data));
+    w->thread_pool_->Add([w, context, md, num_md, cb, user_data] {
+      w->AuthMetadataProcessorAyncWrapper::InvokeProcessor(context, md, num_md,
+                                                           cb, user_data);
+    });
   } else {
     // invoke directly.
     w->InvokeProcessor(context, md, num_md, cb, user_data);
@@ -126,4 +127,24 @@ std::shared_ptr<ServerCredentials> SslServerCredentials(
       new SecureServerCredentials(c_creds));
 }
 
+namespace experimental {
+
+std::shared_ptr<ServerCredentials> AltsServerCredentials(
+    const AltsServerCredentialsOptions& options) {
+  grpc_alts_credentials_options* c_options =
+      grpc_alts_credentials_server_options_create();
+  grpc_server_credentials* c_creds =
+      grpc_alts_server_credentials_create(c_options);
+  grpc_alts_credentials_options_destroy(c_options);
+  return std::shared_ptr<ServerCredentials>(
+      new SecureServerCredentials(c_creds));
+}
+
+std::shared_ptr<ServerCredentials> LocalServerCredentials(
+    grpc_local_connect_type type) {
+  return std::shared_ptr<ServerCredentials>(
+      new SecureServerCredentials(grpc_local_server_credentials_create(type)));
+}
+
+}  // namespace experimental
 }  // namespace grpc

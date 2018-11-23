@@ -61,8 +61,6 @@
 // - Test handling of creation of faulty RR instance by having the LB return a
 //   serverlist with non-existent backends after having initially returned a
 //   valid one.
-// - test using secure credentials and make sure we don't send call
-//   credentials to the balancer
 //
 // Findings from end to end testing to be covered here:
 // - Handling of LB servers restart, including reconnection after backing-off
@@ -126,12 +124,22 @@ class CountedService : public ServiceType {
 using BackendService = CountedService<TestServiceImpl>;
 using BalancerService = CountedService<LoadBalancer::Service>;
 
+const char g_kCallCredsMdKey[] = "Balancer should not ...";
+const char g_kCallCredsMdValue[] = "... receive me";
+
 class BackendServiceImpl : public BackendService {
  public:
   BackendServiceImpl() {}
 
   Status Echo(ServerContext* context, const EchoRequest* request,
               EchoResponse* response) override {
+    // Backend should receive the call credentials metadata.
+    auto call_credentials_entry =
+        context->client_metadata().find(g_kCallCredsMdKey);
+    EXPECT_NE(call_credentials_entry, context->client_metadata().end());
+    if (call_credentials_entry != context->client_metadata().end()) {
+      EXPECT_EQ(call_credentials_entry->second, g_kCallCredsMdValue);
+    }
     IncreaseRequestCount();
     const auto status = TestServiceImpl::Echo(context, request, response);
     IncreaseResponseCount();
@@ -190,6 +198,9 @@ class BalancerServiceImpl : public BalancerService {
         shutdown_(false) {}
 
   Status BalanceLoad(ServerContext* context, Stream* stream) override {
+    // Balancer shouldn't receive the call credentials metadata.
+    EXPECT_EQ(context->client_metadata().find(g_kCallCredsMdKey),
+              context->client_metadata().end());
     gpr_log(GPR_INFO, "LB[%p]: BalanceLoad", this);
     LoadBalanceRequest request;
     std::vector<ResponseDelayPair> responses_and_delays;
@@ -394,8 +405,15 @@ class GrpclbEnd2endTest : public ::testing::Test {
     uri << "fake:///" << kApplicationTargetName_;
     // TODO(dgq): templatize tests to run everything using both secure and
     // insecure channel credentials.
-    std::shared_ptr<ChannelCredentials> creds(new SecureChannelCredentials(
-        grpc_fake_transport_security_credentials_create()));
+    grpc_channel_credentials* channel_creds =
+        grpc_fake_transport_security_credentials_create();
+    grpc_call_credentials* call_creds = grpc_md_only_test_credentials_create(
+        g_kCallCredsMdKey, g_kCallCredsMdValue, false);
+    std::shared_ptr<ChannelCredentials> creds(
+        new SecureChannelCredentials(grpc_composite_channel_credentials_create(
+            channel_creds, call_creds, nullptr)));
+    grpc_call_credentials_unref(call_creds);
+    grpc_channel_credentials_unref(channel_creds);
     channel_ = CreateCustomChannel(uri.str(), creds, args);
     stub_ = grpc::testing::EchoTestService::NewStub(channel_);
   }
@@ -521,13 +539,15 @@ class GrpclbEnd2endTest : public ::testing::Test {
     balancers_.at(i)->add_response(response, delay_ms);
   }
 
-  Status SendRpc(EchoResponse* response = nullptr, int timeout_ms = 1000) {
+  Status SendRpc(EchoResponse* response = nullptr, int timeout_ms = 1000,
+                 bool wait_for_ready = false) {
     const bool local_response = (response == nullptr);
     if (local_response) response = new EchoResponse;
     EchoRequest request;
     request.set_message(kRequestMessage_);
     ClientContext context;
     context.set_deadline(grpc_timeout_milliseconds_to_deadline(timeout_ms));
+    if (wait_for_ready) context.set_wait_for_ready(true);
     Status status = stub_->Echo(&context, request, response);
     if (local_response) delete response;
     return status;
@@ -714,6 +734,25 @@ TEST_F(SingleBalancerTest, InitiallyEmptyServerlist) {
   EXPECT_EQ(1U, balancer_servers_[0].service_->request_count());
   // and sent two responses.
   EXPECT_EQ(2U, balancer_servers_[0].service_->response_count());
+}
+
+TEST_F(SingleBalancerTest, AllServersUnreachableFailFast) {
+  SetNextResolutionAllBalancers();
+  const size_t kNumUnreachableServers = 5;
+  std::vector<int> ports;
+  for (size_t i = 0; i < kNumUnreachableServers; ++i) {
+    ports.push_back(grpc_pick_unused_port_or_die());
+  }
+  ScheduleResponseForBalancer(
+      0, BalancerServiceImpl::BuildResponseForBackends(ports, {}), 0);
+  const Status status = SendRpc();
+  // The error shouldn't be DEADLINE_EXCEEDED.
+  EXPECT_EQ(StatusCode::UNAVAILABLE, status.error_code());
+  balancers_[0]->NotifyDoneWithServerlists();
+  // The balancer got a single request.
+  EXPECT_EQ(1U, balancer_servers_[0].service_->request_count());
+  // and sent a single response.
+  EXPECT_EQ(1U, balancer_servers_[0].service_->response_count());
 }
 
 TEST_F(SingleBalancerTest, Fallback) {
@@ -1121,7 +1160,7 @@ TEST_F(UpdatesTest, UpdateBalancersDeadUpdate) {
   EXPECT_EQ(0U, backend_servers_[1].service_->request_count());
   WaitForBackend(1);
 
-  // This is serviced by the existing RR policy
+  // This is serviced by the updated RR policy
   backend_servers_[1].service_->ResetCounters();
   gpr_log(GPR_INFO, "========= BEFORE THIRD BATCH ==========");
   CheckRpcSendOk(10);
@@ -1329,7 +1368,7 @@ TEST_F(SingleBalancerTest, DropAllFirst) {
           {}, {{"rate_limiting", num_of_drop_by_rate_limiting_addresses},
                {"load_balancing", num_of_drop_by_load_balancing_addresses}}),
       0);
-  const Status status = SendRpc();
+  const Status status = SendRpc(nullptr, 1000, true);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.error_message(), "Call dropped by load balancing policy");
 }
@@ -1354,7 +1393,7 @@ TEST_F(SingleBalancerTest, DropAll) {
   // fail.
   Status status;
   do {
-    status = SendRpc();
+    status = SendRpc(nullptr, 1000, true);
   } while (status.ok());
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(status.error_message(), "Call dropped by load balancing policy");
@@ -1362,7 +1401,7 @@ TEST_F(SingleBalancerTest, DropAll) {
 
 class SingleBalancerWithClientLoadReportingTest : public GrpclbEnd2endTest {
  public:
-  SingleBalancerWithClientLoadReportingTest() : GrpclbEnd2endTest(4, 1, 2) {}
+  SingleBalancerWithClientLoadReportingTest() : GrpclbEnd2endTest(4, 1, 3) {}
 };
 
 TEST_F(SingleBalancerWithClientLoadReportingTest, Vanilla) {

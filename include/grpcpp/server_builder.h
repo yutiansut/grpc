@@ -28,6 +28,7 @@
 #include <grpc/support/cpu.h>
 #include <grpc/support/workaround_list.h>
 #include <grpcpp/impl/channel_argument_option.h>
+#include <grpcpp/impl/codegen/server_interceptor.h>
 #include <grpcpp/impl/server_builder_option.h>
 #include <grpcpp/impl/server_builder_plugin.h>
 #include <grpcpp/support/config.h>
@@ -52,7 +53,7 @@ class ServerBuilderPluginTest;
 class ServerBuilder {
  public:
   ServerBuilder();
-  ~ServerBuilder();
+  virtual ~ServerBuilder();
 
   //////////////////////////////////////////////////////////////////////////////
   // Primary API's
@@ -65,7 +66,7 @@ class ServerBuilder {
   ///     traffic (via AddListeningPort)
   ///  3. [for async api only] completion queues have been added via
   ///     AddCompletionQueue
-  std::unique_ptr<Server> BuildAndStart();
+  virtual std::unique_ptr<Server> BuildAndStart();
 
   /// Register a service. This call does not take ownership of the service.
   /// The service must exist for the lifetime of the \a Server instance returned
@@ -86,8 +87,8 @@ class ServerBuilder {
   /// \param creds The credentials associated with the server.
   /// \param selected_port[out] If not `nullptr`, gets populated with the port
   /// number bound to the \a grpc::Server for the corresponding endpoint after
-  /// it is successfully bound, 0 otherwise.
-  ///
+  /// it is successfully bound by BuildAndStart(), 0 otherwise. AddListeningPort
+  /// does not modify this pointer.
   ServerBuilder& AddListeningPort(const grpc::string& addr_uri,
                                   std::shared_ptr<ServerCredentials> creds,
                                   int* selected_port = nullptr);
@@ -144,12 +145,14 @@ class ServerBuilder {
   // Fine control knobs
 
   /// Set max receive message size in bytes.
+  /// The default is GRPC_DEFAULT_MAX_RECV_MESSAGE_LENGTH.
   ServerBuilder& SetMaxReceiveMessageSize(int max_receive_message_size) {
     max_receive_message_size_ = max_receive_message_size;
     return *this;
   }
 
   /// Set max send message size in bytes.
+  /// The default is GRPC_DEFAULT_MAX_SEND_MESSAGE_LENGTH.
   ServerBuilder& SetMaxSendMessageSize(int max_send_message_size) {
     max_send_message_size_ = max_send_message_size;
     return *this;
@@ -210,14 +213,70 @@ class ServerBuilder {
   /// doc/workarounds.md.
   ServerBuilder& EnableWorkaround(grpc_workaround_list id);
 
- private:
-  friend class ::grpc::testing::ServerBuilderPluginTest;
+  /// NOTE: class experimental_type is not part of the public API of this class.
+  /// TODO(yashykt): Integrate into public API when this is no longer
+  /// experimental.
+  class experimental_type {
+   public:
+    explicit experimental_type(ServerBuilder* builder) : builder_(builder) {}
 
+    void SetInterceptorCreators(
+        std::vector<
+            std::unique_ptr<experimental::ServerInterceptorFactoryInterface>>
+            interceptor_creators) {
+      builder_->interceptor_creators_ = std::move(interceptor_creators);
+    }
+
+   private:
+    ServerBuilder* builder_;
+  };
+
+  /// NOTE: The function experimental() is not stable public API. It is a view
+  /// to the experimental components of this class. It may be changed or removed
+  /// at any time.
+  experimental_type experimental() { return experimental_type(this); }
+
+ protected:
+  /// Experimental, to be deprecated
   struct Port {
     grpc::string addr;
     std::shared_ptr<ServerCredentials> creds;
     int* selected_port;
   };
+
+  /// Experimental, to be deprecated
+  typedef std::unique_ptr<grpc::string> HostString;
+  struct NamedService {
+    explicit NamedService(Service* s) : service(s) {}
+    NamedService(const grpc::string& h, Service* s)
+        : host(new grpc::string(h)), service(s) {}
+    HostString host;
+    Service* service;
+  };
+
+  /// Experimental, to be deprecated
+  std::vector<Port> ports() { return ports_; }
+
+  /// Experimental, to be deprecated
+  std::vector<NamedService*> services() {
+    std::vector<NamedService*> service_refs;
+    for (auto& ptr : services_) {
+      service_refs.push_back(ptr.get());
+    }
+    return service_refs;
+  }
+
+  /// Experimental, to be deprecated
+  std::vector<ServerBuilderOption*> options() {
+    std::vector<ServerBuilderOption*> option_refs;
+    for (auto& ptr : options_) {
+      option_refs.push_back(ptr.get());
+    }
+    return option_refs;
+  }
+
+ private:
+  friend class ::grpc::testing::ServerBuilderPluginTest;
 
   struct SyncServerSettings {
     SyncServerSettings()
@@ -236,15 +295,6 @@ class ServerBuilder {
 
     /// The timeout for server completion queue's AsyncNext call.
     int cq_timeout_msec;
-  };
-
-  typedef std::unique_ptr<grpc::string> HostString;
-  struct NamedService {
-    explicit NamedService(Service* s) : service(s) {}
-    NamedService(const grpc::string& h, Service* s)
-        : host(new grpc::string(h)), service(s) {}
-    HostString host;
-    Service* service;
   };
 
   int max_receive_message_size_;
@@ -271,6 +321,8 @@ class ServerBuilder {
     grpc_compression_algorithm algorithm;
   } maybe_default_compression_algorithm_;
   uint32_t enabled_compression_algorithms_bitset_;
+  std::vector<std::unique_ptr<experimental::ServerInterceptorFactoryInterface>>
+      interceptor_creators_;
 };
 
 }  // namespace grpc

@@ -15,6 +15,7 @@
 import itertools
 import threading
 import unittest
+import logging
 
 import grpc
 
@@ -165,10 +166,12 @@ class FailAfterFewIterationsCounter(object):
 
     def __next__(self):
         if self._current >= self._high:
-            raise Exception("This is a deliberate failure in a unit test.")
+            raise test_control.Defect()
         else:
             self._current += 1
             return self._bytestring
+
+    next = __next__
 
 
 def _unary_unary_multi_callable(channel):
@@ -269,4 +272,5 @@ class InvocationDefectsTest(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    logging.basicConfig()
     unittest.main(verbosity=2)

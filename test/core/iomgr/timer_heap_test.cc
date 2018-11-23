@@ -18,9 +18,6 @@
 
 #include "src/core/lib/iomgr/port.h"
 
-// This test only works with the generic timer implementation
-#ifdef GRPC_TIMER_USE_GENERIC
-
 #include "src/core/lib/iomgr/timer_heap.h"
 
 #include <stdlib.h>
@@ -207,7 +204,7 @@ static void test2(void) {
     }
 
     if (num_inserted) {
-      gpr_atm* min_deadline = nullptr;
+      grpc_millis* min_deadline = nullptr;
       for (size_t i = 0; i < elems_size; i++) {
         if (elems[i].inserted) {
           if (min_deadline == nullptr) {
@@ -299,9 +296,3 @@ int main(int argc, char** argv) {
 
   return 0;
 }
-
-#else /* GRPC_TIMER_USE_GENERIC */
-
-int main(int argc, char** argv) { return 1; }
-
-#endif /* GRPC_TIMER_USE_GENERIC */

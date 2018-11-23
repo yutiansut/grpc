@@ -16,7 +16,7 @@ load("//bazel:grpc_build_system.bzl", "grpc_cc_library", "grpc_cc_test", "grpc_p
 
 licenses(["notice"])  # Apache v2 
          
-grpc_package(name = "handshaker")
+grpc_package(name = "test/core/tsi/alts/handshaker")
          
 grpc_cc_library(
     name = "alts_handshaker_service_api_test_lib",
@@ -37,6 +37,7 @@ grpc_cc_test(
         "//:tsi",
         "//:tsi_interface",
         "//:grpc",
+        "//test/core/util:gpr_test_util",
     ],
 )
 
@@ -47,6 +48,7 @@ grpc_cc_test(
     deps = [
         ":alts_handshaker_service_api_test_lib",
         "//:grpc",
+        "//test/core/util:gpr_test_util",
     ],
 )
 
@@ -60,6 +62,7 @@ grpc_cc_test(
         "//:gpr_base",
         "//:grpc",
         "//:tsi",
+        "//test/core/util:gpr_test_util",
     ],
 )
 
@@ -71,6 +74,7 @@ grpc_cc_test(
         ":alts_handshaker_service_api_test_lib",
         "//:grpc",
         "//:tsi",
+        "//test/core/util:gpr_test_util",
     ],
 )
 
@@ -81,6 +85,7 @@ grpc_cc_test(
     deps = [
         "//:alts_util",
         "//:grpc",
+        "//test/core/util:gpr_test_util",
     ],
 )
 

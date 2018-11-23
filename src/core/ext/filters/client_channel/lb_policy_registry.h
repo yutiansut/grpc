@@ -24,7 +24,6 @@
 #include "src/core/ext/filters/client_channel/lb_policy_factory.h"
 #include "src/core/lib/gprpp/memory.h"
 #include "src/core/lib/gprpp/orphanable.h"
-#include "src/core/lib/iomgr/exec_ctx.h"
 
 namespace grpc_core {
 
@@ -48,6 +47,10 @@ class LoadBalancingPolicyRegistry {
   /// Creates an LB policy of the type specified by \a name.
   static OrphanablePtr<LoadBalancingPolicy> CreateLoadBalancingPolicy(
       const char* name, const LoadBalancingPolicy::Args& args);
+
+  /// Returns true if the LB policy factory specified by \a name exists in this
+  /// registry.
+  static bool LoadBalancingPolicyExists(const char* name);
 };
 
 }  // namespace grpc_core
